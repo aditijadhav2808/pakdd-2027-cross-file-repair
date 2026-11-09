@@ -1,0 +1,325 @@
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\PassOptionsToPackage{hyphens}{url}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+\renewcommand\UrlFont{\rmfamily}
+%
+% Run-in paragraph heading (italic, as in LNCS), without extra vertical space.
+% Float placement: let tables/figures share pages with text instead of leaving gaps.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.85}
+\setcounter{topnumber}{3}
+\setcounter{totalnumber}{4}
+\newcommand{\runin}[1]{\par\textit{#1}\ }
+%
+% Figure helper: uses the image file if present, otherwise a framed placeholder.
+\newcommand{\figorplaceholder}[3]{%
+  \IfFileExists{#1.pdf}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1.pdf}}%
+  {\IfFileExists{#1.png}{\includegraphics[width=#2,height=#3,keepaspectratio]{#1.png}}%
+  {\fbox{\parbox[c][#3][c]{\dimexpr#2-2\fboxsep-2\fboxrule\relax}{\centering\footnotesize [Insert figure file: \texttt{\detokenize{#1}}]}}}}}
+%
+\setlength{\emergencystretch}{1.5em}
+\begin{document}
+%
+\title{What Else Gets Repaired? Mining and Auditing\\ Cross-File Repair after AI-Marked Commits}
+\titlerunning{What Else Gets Repaired?}
+\author{Anonymous Author(s)}
+\authorrunning{Anonymous Author(s)}
+\institute{Anonymous Institution}
+%
+\maketitle
+%
+\begin{abstract}
+AI coding agents now commit code to open-source projects, but it is unclear whether their changes are followed by repairs that reach other parts of the code base. We define a spreading-repair event as a fix-like commit, made within 14 days, that touches at least one file changed by the original commit and at least one file it did not change. In a matched design with a pre-specified primary analysis, we compare 6,422 commits that carry an explicit AI-assistance marker with 30,808 unmarked commits from the same 45 repositories. Spreading repair followed 50.8\% of marked and 48.0\% of unmarked commits (+2.8 percentage points, 95\% CI 0.6 to 5.3); a difference-in-differences correction for a pre-existing gap gives +1.9 (0.3 to 3.5). We then audit this evidence. A closed-form result, confirmed by a calibrated simulation, shows that a gap of at most 5.4 points in spurious fix-labelled events would explain the finding, that difference-in-differences removes stable but not AI-induced labelling differences, and that percentile cluster-bootstrap intervals under-cover. Ruling out such a gap would require about 2,530 hand-labelled events per group. The association is small, heterogeneous across repositories and fragile.
+
+\keywords{AI-assisted programming \and Mining software repositories \and Causal inference \and Label noise \and Reliability of mined evidence}
+\end{abstract}
+%
+%
+\section{Introduction}
+A software change is rarely local. Change impact analysis studies what else a modification may affect~\cite{arnold1996}, and files that changed together in the past tend to change together again~\cite{zimmermann2004}. AI coding agents now make such changes at scale: one public dataset records 456,535 agent-authored pull requests in 61,453 repositories~\cite{li2025}. Most evaluations of these agents ask whether a change is correct in itself, through benchmark pass rates or merge rates~\cite{jimenez2024,watanabe2026}. Fewer ask what the change does to the surrounding code, although a sizeable share of test-passing patches behave differently from the developers' own fixes~\cite{wang2026}, and mined evidence on what follows agent commits is mixed~\cite{khosravani2026,kraishan2026,xia2026}. We mine version histories to answer three questions. RQ1: Are commits that carry an explicit AI-assistance marker followed more often than comparable unmarked commits by repair that spreads beyond the files they changed? RQ2: How heterogeneous and how fragile is that association across repositories? RQ3: Which estimators and interval methods can be trusted for this design, and how large a labelling or confounding artefact would be needed to explain the finding?
+
+\runin{Contributions.} (i)~A mined outcome, the spreading-repair event, and a matched same-repository design for marker-labelled commits, with a pre-specified primary analysis. (ii)~A study of 6,422 AI-marked and 30,808 matched unmarked commits from 45 repositories, with placebo, within-author and difference-in-differences checks, a 95\% prediction interval and an exact cluster-fragility audit. (iii)~An audit framework for mined evidence on AI-assisted commits: a closed-form bias result for differential label noise, which converts any estimate into a tipping point expressed in labelling terms; a simulation study calibrated to the data, with known ground truth, that validates the result and shows which interval methods are calibrated and when difference-in-differences removes bias; and a sample-size result for the manual validation needed to rule out the artefact. (iv)~A replication package with a ready-to-run validation toolkit. The association we find is small and fragile, and we state which conclusions the data support and which they do not. The underlying problem is a general data-mining one: any comparison of AI-assisted and human work mined from logs must draw conclusions from clustered observational data whose labels are extracted from text and may be noisier in one group than in the other.
+
+\section{Related Work}
+
+\runin{Mechanisms.} Hidden couplings make machine-learning systems brittle~\cite{sculley2015}; generated code mismatches library versions~\cite{misra2026} and invents package names~\cite{spracklen2025}; tests accept wrong patches~\cite{wang2026,liu2023}; generated code carries security weaknesses~\cite{pearce2022,fu2025}; and hosted models change behaviour between versions~\cite{chen2024}. Most of this evidence concerns failures inside the generated code or the acceptance process, not in neighbouring components. \textit{Mining what follows AI-authored changes.} Linking later repairs to earlier changes is a standard mining task~\cite{sliwerski2005}, but the bug labels on which such links rely are often wrong~\cite{herzig2013}. Khosravani and Mockus found bug-fix keywords 1.26 to 1.34 times as often in commits by three agents as in human commits from the same projects, but SZZ ratios below one, and attributed the excess to agents being used for maintenance~\cite{khosravani2026}. Kraishan found that revert rates differ by vendor and that no agent imposes a higher per-line churn~\cite{kraishan2026}; Xia and Miller found more corrective maintenance for agentic code in 182 repositories~\cite{xia2026}; Liu et al.\ found that quality issues introduced by AI-authored commits often persist~\cite{liu2026}; and He et al.\ found persistent complexity increases after Cursor adoption~\cite{he2026}. Ferdous et al.\ found fewer breaking API changes from agents overall but more during refactoring~\cite{ferdous2026}, and Oukay et al.\ traced reverted agent changes mainly to scope and context errors~\cite{oukay2026}. These studies measure later maintenance of the changed lines~\cite{kraishan2026,xia2026}, reverts~\cite{oukay2026}, breaking API changes~\cite{ferdous2026}, static-analysis issues~\cite{liu2026,he2026} or keyword and SZZ ratios~\cite{khosravani2026}. Our outcome differs in kind: it asks whether a later repair crosses the original commit's file boundary, and it compares marked commits with matched commits from the same repository and period. The mixed results of these studies also show that the tasks for which agents are used shape what follows their commits. \textit{Robust inference from clustered mined data.} With few clusters, cluster-robust and bootstrap intervals can be miscalibrated~\cite{cameron2008}; random-effects meta-analysis with Hartung--Knapp--Sidik--Jonkman (HKSJ) intervals~\cite{inthout2014} and prediction intervals~\cite{higgins2009} describes heterogeneous effects. Fragility indices count how many observations must change, or be dropped, to overturn a result~\cite{walsh2014,broderick2020}. We apply these tools to a mining study and evaluate them by simulation~\cite{morris2019}.
+
+\section{Problem Formulation and Mining Method}
+
+\subsection{Marked Commits and the Spreading-Repair Event}\label{sec:outcome}
+
+Let a repository history be a sequence of non-merge commits $c$, each with an author, a committer date $t(c)$, a message and a changed-file set $F(c)$. A commit is AI-marked if its message, author or committer carries an explicit AI-assistance marker. Claude Code is identified by a ``Co-authored-by: Claude'' trailer or a ``Generated with Claude Code'' line; Codex by a ``Co-authored-by: Codex'' trailer or a ``generated with Codex'' line; OpenHands by a ``Co-authored-by: OpenHands'' trailer; Copilot, Devin and Cursor by their agent identities or co-author trailers; and Aider by the ``(aider)'' author-name suffix or an ``aider:'' message prefix (full patterns are in the online appendix). AI-marked commits are thus the subset of AI-assisted commits whose authors disclosed the assistance. Automation accounts are excluded. A later commit $c'$ is fix-like if its subject contains \emph{fix}, \emph{bug}, \emph{hotfix}, \emph{regression}, \emph{revert}, \emph{broke} or \emph{crash} as a whole word. Commit $c$ has a spreading-repair event if some fix-like commit $c'$ by a non-bot author satisfies
+\begin{equation}\label{eq:event}
+0 < t(c') - t(c) \le 14 \text{ days}, \qquad F(c') \cap F(c) \neq \emptyset, \qquad F(c') \setminus F(c) \neq \emptyset.
+\end{equation}
+The outcome $R_{14}$ therefore records a later repair that touches the original change and spreads beyond it. It measures cross-file repair activity, not defects introduced by the original commit. False positives arise when a keyword marks a change that is not a defect repair (``fix typo'', ``fix lint''), when the repair concerns an unrelated or older defect, or when a tangled commit mixes repair with other work; false negatives arise from inflected or unlabelled repairs (``fixed'', ``correct handling''). Because one follow-up commit can satisfy~\eqref{eq:event} for several earlier commits, events are not independent within a repository, so inference treats repositories as clusters (Section~\ref{sec:inference}). The placebo outcome applies~\eqref{eq:event} to the 14 days before $c$.
+
+\subsection{Matched Design and Estimands}
+
+The matching variables are drivers of later repair that can be measured for every commit: repository conventions and activity (same repository, within 30 days), change size (file-count bin) and test involvement. Each eligible marked commit (1 to 50 changed files, at least one of them a source file) is matched to up to five eligible unmarked commits drawn at random without replacement from the same repository, within 30 days, in the same file-count bin (1, 2--3, 4--7, 8--15, 16--50) and with the same tests-touched flag. At most 300 marked commits per repository are sampled, and repositories with fewer than 20 matched sets are excluded. For marked commit $i$ with control set $C_i$, let $d_i = y_i - \bar{y}(C_i)$. The primary estimand is the average effect on the marked commits,
+\begin{equation}\label{eq:theta}
+\theta = \frac{1}{N}\sum_i d_i = \frac{\sum_r n_r d_r}{\sum_r n_r},
+\end{equation}
+where $d_r$ is the mean difference in repository $r$ and $n_r$ is its number of matched sets. The difference-in-differences (DiD) estimate replaces $d_i$ with the post-period difference minus the placebo difference, which removes any marked--control gap that is constant over time. Its identifying assumption is that, absent the marker, the gap in $R_{14}$ would have been the same in the 14 days after the commit as in the 14 days before. A single pre-period cannot test this assumption, so we read DiD as an adjusted association, not a causal effect. The random-effects estimand $\mu$ is the average repository difference. The analysis plan (hypothesis, matching, outcomes, primary estimator and seven sensitivity analyses S1--S7) was time-stamped before any outcome was computed; it is included in the anonymised repository with its time stamp and a record of which analyses are post hoc. The placebo, DiD and all analyses in Sections~\ref{sec:bias}, \ref{sec:hetero}, \ref{sec:sim} and~\ref{sec:proxy} are post hoc, apart from the pre-specified percentile interval reported in Table~\ref{tab:inference}.
+
+\subsection{Inference and Fragility}\label{sec:inference}
+Because commits in a repository share conventions and maintainers, inference treats the $G = 45$ repositories as clusters. We report the pre-specified percentile cluster bootstrap and, as checks, the BCa bootstrap~\cite{efron1987}, a cluster-robust $t$ interval (CR1), a wild cluster bootstrap-$t$ with the null imposed~\cite{cameron2008}, the DerSimonian--Laird estimate~\cite{dersimonian1986} with an HKSJ interval and a 95\% prediction interval, and $I^2$~\cite{higgins2002}. The significance fragility index $\mathrm{FI}_{\mathrm{sig}}$ is the smallest number of repositories whose removal makes the CR1 lower bound non-positive, and the direction fragility index $\mathrm{FI}_{\mathrm{dir}}$ is the smallest number whose removal makes the point estimate non-positive. For~\eqref{eq:theta}, $\mathrm{FI}_{\mathrm{dir}}$ has a closed form: it is the smallest $k$ for which the $k$ largest contributions $n_r d_r$ sum to at least $\sum_r n_r d_r$. $\mathrm{FI}_{\mathrm{sig}}$ and the random-effects $\mathrm{FI}_{\mathrm{dir}}$ were found by exhaustive enumeration of all subsets of up to six repositories.
+
+\subsection{Bias from Differential Label Noise}\label{sec:bias}
+The outcome is mined from commit messages, so its errors may differ between groups; for instance, developers who disclose AI use may also label more commits as fixes. Let $y$ be the true outcome, with probability $p$, and let the mined outcome be $y' = y \lor e$, where a spurious event $e$ occurs independently with probability $q_M$ for marked and $q_C$ for control commits. Then $P(y' = 1) = 1 - (1 - p)(1 - q)$, and if marked and control commits have the same $p$,
+\begin{equation}\label{eq:bias}
+\text{bias} = (1 - p)(q_M - q_C) = (1 - p)\,\Delta q,
+\end{equation}
+where $p$ is the set-weighted true repair rate. If $\Delta q$ is the same before and after the commit, the DiD estimator removes this bias; if the gap arises only after the commit, DiD retains it. Equation~\eqref{eq:bias} yields a labelling tipping point: an estimate $\theta$ is fully explained by a spurious-event gap of $\Delta q^{*} = \theta/(1 - p)$. Because noise can only inflate the observed control rate, $p \le 0.480$ and $1 - p \ge 0.520$, so $\Delta q^{*}$ is at most 5.4 points for the matched estimate (+2.8) and at most 3.7 points for the DiD estimate (+1.9). A gap of that size that appears only after AI-marked commits would suffice to explain the finding.
+
+\section{Data}
+We chose 77 public GitHub repositories in advance: AI coding tools and AI application frameworks, in which markers are common, and large general-purpose projects. Blobless clones yielded 574,885 non-merge commits made since 1 January 2024. The analysis window runs from 1 February 2024 to 30 days before each repository's last commit. After automation accounts were removed, 36,264 commits in 70 repositories carried a marker, and 26,537 of them were eligible. Matching, the 300-commit cap and the 20-set threshold left 6,422 marked commits and 30,808 distinct controls (4.8 per marked commit) from 45 repositories and 1,429 author identities. Balance on the matched variables was close (mean files changed 6.50 against 6.43; 65.0\% touching tests in both groups). Claude Code (3,435) and Copilot (1,492) markers dominate; Codex, Cursor, Devin, Aider and OpenHands contribute 239 to 377 each. Marker precision and recall were not measured, and undisclosed AI use among controls biases the comparison toward zero.
+
+\section{Results}
+\subsection{Primary Result and Robustness (RQ1)}
+About half of all commits, marked or not, were followed within 14 days by a spreading-repair event, so the proxy is broad. Marked commits were followed by one more often: +2.8 percentage points (95\% CI 0.6 to 5.3; ratio 1.06), in the direction of the pre-specified hypothesis (Table~\ref{tab:primary}). Most sensitivity analyses gave +2.4 to +3.4 points, but the intervals for same-author controls (S1) and for the 30-day window (S5) include zero. The pre-period placebo was +1.0 point, so part of the gap existed before the commits; the DiD estimate, which removes it, was +1.9 points (0.3 to 3.5). Reverts were too rare to compare. By tool family (S6), only Claude Code and Copilot have enough repositories for interpretation, and both family-specific intervals include zero; all families are listed in the online appendix.
+
+\begin{table}[!tb]
+\caption{Primary outcome $R_{14}$ and checks. Intervals are percentile cluster-bootstrap intervals (pp = percentage points; --- = group rates not reported). S6 is the analysis by tool family; other families are in the online appendix.}\label{tab:primary}
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Analysis & Marked & Control & Difference, pp (95\% CI) \\
+\midrule
+Main analysis (pre-specified) & 50.8\% & 48.0\% & $+2.8$ \ (0.6, 5.3) \\
+\midrule
+S1 \ Same-author controls (3,224 sets) & 51.9\% & 49.3\% & $+2.6$ \ ($-0.4$, 5.9) \\
+S2 \ Exclude same-author follow-ups ${<}\,24$\,h & 49.4\% & 46.5\% & $+2.9$ \ (0.8, 5.2) \\
+S3 \ Strict repair pattern & 46.6\% & 43.2\% & $+3.4$ \ (1.2, 5.8) \\
+S4 \ Follow-ups touching ${\le}\,20$ files & --- & --- & $+2.9$ \ (0.7, 5.3) \\
+S5 \ Window of 7 days & 39.8\% & 37.5\% & $+2.4$ \ (0.0, 5.0) \\
+S5 \ Window of 30 days & 62.1\% & 60.8\% & $+1.3$ \ ($-1.0$, 3.6) \\
+S6 \ Claude Code (3,435 sets, 40 repos) & 50.6\% & 49.4\% & $+1.2$ \ ($-0.8$, 3.3) \\
+S6 \ Copilot (1,492 sets, 40 repos) & 39.0\% & 35.4\% & $+3.6$ \ ($-0.2$, 7.5) \\
+S7 \ Drop largest contributor & 49.6\% & 46.6\% & $+3.0$ \ (0.7, 5.6) \\
+\midrule
+Placebo: 14 days before (post hoc) & 48.9\% & 47.9\% & $+1.0$ \ ($-0.6$, 2.6) \\
+Difference-in-differences (post hoc) & --- & --- & $+1.9$ \ (0.3, 3.5) \\
+$F_{14}$ \ fix-like follow-up on a shared file & 57.7\% & 54.2\% & $+3.5$ \ (1.2, 6.1) \\
+$\mathrm{REV}_{30}$ \ revert within 30 days & 0.34\% & 0.31\% & $+0.03$ \ ($-0.09$, 0.16) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Heterogeneity and Inference (RQ2)}\label{sec:hetero}
+
+Heterogeneity was substantial ($I^2 = 70\%$; between-repository SD $\tau \approx 6.2$ points). Repository differences ranged from $-11.9$ to $+26.7$ points and were positive in 23 repositories and negative in 22. All methods that weight matched sets equally exclude zero, whereas methods that give repositories more equal weight include it (Table~\ref{tab:inference}), so the answer depends on whether the target is the average marked commit or the average repository. The prediction interval of $-10.4$ to $+15.2$ points means that a team cannot expect to see the pooled difference in its own repository. In an exploratory weighted meta-regression, repositories with lower control rates had larger differences (slope $-0.15$ points per point, cluster-robust $p = 0.036$), whereas the marked rate was unrelated ($p = 0.69$); AI-tool repositories (+3.6) and general-purpose ones (+1.9) did not differ significantly ($p = 0.47$).
+
+\begin{table}[!tb]
+\caption{Inference for the primary estimate. Rows 1--4 estimate the effect on the average marked commit ($\theta$, weighted by matched sets); rows 5--7 estimate the average repository ($\mu$).}\label{tab:inference}
+\centering\footnotesize
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Method & Estimate & 95\% interval or $p$-value \\
+\midrule
+Percentile cluster bootstrap (pre-specified) & $+2.83$ & 0.65 to 5.34 \\
+BCa cluster bootstrap & $+2.83$ & 0.94 to 5.80 \\
+Cluster-robust $t$ (CR1, 44 df) & $+2.83$ & 0.42 to 5.25 \\
+Wild cluster bootstrap-$t$, null imposed & $+2.83$ & 0.40 to 5.25; $p = 0.020$ \\
+\midrule
+Random effects (DL), HKSJ interval & $+2.43$ & $-0.04$ to 4.90 \\
+Random effects, 95\% prediction interval & $+2.43$ & $-10.4$ to 15.2 \\
+Unweighted repository mean, $t$ test & $+2.25$ & $-0.32$ to 4.82; $p = 0.084$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[!tb]
+\centering
+\figorplaceholder{fig1_repo_differences}{0.62\textwidth}{0.235\textwidth}
+\caption{Repository differences against control rate; point area is proportional to matched sets, and the line is the weighted meta-regression (exploratory).}\label{fig:repo}
+\end{figure}
+
+\runin{Fragility.} Removing a single repository (Roslyn) moves the CR1 lower bound to +0.04; removing two (Roslyn and Open WebUI, 7.1\% of matched sets) makes it negative, so $\mathrm{FI}_{\mathrm{sig}} = 2$. Reversing the sign of $\theta$ requires removing 8 repositories (29\% of matched sets), and reversing the random-effects estimate requires 6 (18\%); both values are exact. Roslyn and Open WebUI are outliers with low control rates in Fig.~\ref{fig:repo}, which suggests that the fragility is tied to repository conventions rather than to chance alone.
+
+\section{Simulation Study (RQ3)}\label{sec:sim}
+
+\runin{Design.} Following~\cite{morris2019}, we generated 2,000 synthetic data sets per scenario with the structure of the real study: the 45 repositories with their matched-set counts and control rates, one to five controls per set (mean 4.8), a set-level file-volatility effect shared by each marked commit and its controls (logit SD 1), and repository effects drawn from $\mathcal{N}(\mu, 6.2^2)$ points. Scenarios Sim0--Sim5 (named to avoid confusion with the sensitivity analyses S1--S7) vary the true effect $\mu$; a time-invariant confounder $\gamma$ that raises the log-odds of repair for marked commits in both periods ($\gamma = 0.045$, which reproduces a placebo of about +0.9 points); and proxy noise, in which spurious fix-like cross-file events are added at rate $q_C$ to controls and $q_M$ to marked commits in both periods. Each replicate applies the estimators and intervals of Section~\ref{sec:inference}. The design is anchored to the observed data: cluster sizes, control rates and the between-repository SD $\tau$ are taken from the study, and $\gamma$ is set to reproduce the observed placebo. Only the volatility SD is assumed, and repeating Sim0 and Sim2 with SDs of 0.5 and 2 (online appendix) leaves the conclusions unchanged. Seeds are fixed, and the generator, parameters, outputs and figure scripts are in the repository.
+
+\begin{table}[!tb]
+\caption{Simulation results (2,000 replicates per scenario). Cov.\ = coverage (\%) of nominal 95\% intervals: pct.\ = percentile bootstrap, CR1 = cluster-robust $t$, wild = wild cluster bootstrap-$t$, DiD = difference-in-differences; Reject $H_0$ = false- or true-positive rate (\%) at $\alpha = 0.05$; bias in pp.}\label{tab:sim}
+\centering\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}l@{\hspace{4pt}}lrrrrcc@{}}
+\toprule
+ & & \multicolumn{4}{c}{Cov.} & Reject $H_0$ & Bias \\
+\cmidrule(lr){3-6}
+\multicolumn{2}{@{}l}{Scenario} & pct. & CR1 & wild & DiD & (pct.\ / wild) & (matched / DiD) \\
+\midrule
+Sim0 & $\mu = 0$ & 93.0 & 94.2 & 95.0 & 93.5 & 7.0 / 5.2 & $+0.05$ / $+0.04$ \\
+Sim1 & $\mu = 2.8$ & 93.1 & 94.1 & 94.6 & 93.9 & 62.2 / 56.3 & $+0.02$ / $+0.01$ \\
+Sim2 & $\mu = 0$, $\gamma = 0.045$ & 88.8 & 89.6 & 91.3 & 94.8 & 11.2 / 8.7 & $+0.84$ / 0.00 \\
+Sim3 & $\mu = 1.9$, $\gamma = 0.045$ & 87.7 & 88.8 & 90.5 & 94.5 & 59.1 / 53.0 & $+0.80$ / $-0.04$ \\
+Sim4 & $\mu = 0$, $q_M = q_C = 0.30$ & 92.7 & 93.4 & 94.2 & 93.4 & 7.2 / 5.8 & $+0.04$ / $+0.03$ \\
+Sim5 & $\mu = 0$, $q_M = 0.33$, $q_C = 0.30$ & 62.5 & 65.4 & 67.4 & 93.6 & 37.6 / 32.4 & $+1.53$ / $-0.02$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\runin{Findings.} Without confounding (Sim0, Sim1), the pre-specified percentile bootstrap under-covers (93.0\%) and rejects a true null 7.0\% of the time, whereas the wild cluster bootstrap is close to nominal (95.0\% coverage, 5.2\% size); the observed wild $p = 0.020$ therefore survives correct calibration. Power to detect a true 2.8-point effect is only 56--62\%. A modest time-invariant confounder (Sim2, Sim3) biases the matched estimate by about +0.8 points, roughly the size of the simulated placebo (+0.84), and raises the false-positive rate from 5.2\% to 8.7\% (wild) and from 7.0\% to 11.2\% (percentile), whereas DiD is unbiased with nominal coverage. Scenario Sim3 reproduces the observed pattern closely (matched +2.70, DiD +1.86, placebo +0.84), which makes the DiD estimate of +1.9 points the more credible of the two. Non-differential proxy noise (Sim4) leaves inference calibrated, but a three-point difference in spurious-event rates (Sim5) yields a ``significant'' difference in 32--38\% of null replicates; DiD removes it only because the noise was constant over time. Noise that differs both between groups and between periods would not be removed. \textit{Validating equation~\eqref{eq:bias}.} We repeated Sim4--Sim5 with gaps $\Delta q$ from 0 to 5 points (400 replicates each) and with a 3-point gap present only after the commit. Simulated bias follows~\eqref{eq:bias} within Monte Carlo error at every gap (Fig.~\ref{fig:sim}, left). The matched estimator's false-positive rate rises from 2.5\% to 74\% as the gap grows, whereas DiD stays near 5\% while the gap is constant over time. When the gap appears only after the commit, DiD is biased by +1.53 points, as~\eqref{eq:bias} predicts, and rejects a true null in 23\% of replicates (Fig.~\ref{fig:sim}, right). DiD therefore protects against stable labelling conventions but not against conventions that change with AI use.
+
+\begin{figure}[!tb]
+\centering
+\figorplaceholder{fig2_label_noise}{\textwidth}{0.235\textwidth}
+\caption{Bias (left) and false-positive rate at $\alpha = 0.05$ (right) of the matched and DiD estimators against the spurious-event gap $\Delta q$, with the closed form~\eqref{eq:bias}.}\label{fig:sim}
+\end{figure}
+
+\section{Bias Analysis for the Proxy}\label{sec:proxy}
+Let $p_M$ and $p_C$ be the precision of $R_{14}$ among marked and control commits, and let $\mathit{Se}$ be a common sensitivity. The genuine difference is then $(50.8\,p_M - 48.0\,p_C)/\mathit{Se}$, which is zero if precision among marked commits is lower by only 5.5\% in relative terms. In a probabilistic bias analysis~\cite{lash2009} with $p_C \sim \mathrm{Beta}$(mean 0.5, SD 0.15), $\mathit{Se} \sim U(0.6, 0.9)$ and 200,000 cluster-bootstrap draws, equal precision gives a median genuine difference of +1.7 points (95\% simulation interval 0.3 to 4.4; $\Pr({>}\,0) = 0.996$); a log-normal precision ratio with SD 0.05 gives +1.7 ($-1.7$ to 6.7; $\Pr({>}\,0) = 0.85$); and precision 5\% lower among marked commits gives +0.2 ($-3.6$ to 4.3; $\Pr({>}\,0) = 0.54$). The E-value for the risk ratio is 1.31 (1.11 for the lower confidence limit)~\cite{vanderweele2017}. Measuring precision by group is therefore the decisive next step. \textit{How large must a validation be?} The precision gap that would erase the effect is 5.5\% in relative terms, or 2.8 points at a precision of 0.5. Ruling out a gap of that size with 95\% confidence requires about 2,530 labelled events per group. A validation of 400 events per group, larger than many in mining studies (one recent validation of a corrective-commit classifier used 288 commits~\cite{khosravani2026}), has only 12\% power to detect such a gap and can exclude only gaps larger than 6.9 points. In a synthetic test of our labelling toolkit with equal precision in both groups, 400 labels per group gave a corrected difference of +0.7 points with a 95\% interval of $-2.9$ to +4.3. Small effects mined from message-based labels therefore need either a validation an order of magnitude larger than is usual or an outcome that does not depend on messages, such as failures in continuous-integration runs.
+
+\section{Discussion and Threats to Validity}
+
+\runin{What the data support.} The evidence supports a small difference in observed cross-file repair activity associated with explicit AI-assistance markers: about +2.8 points by the pre-specified analysis, or +1.9 after removing the pre-existing gap. It does not show that AI-generated changes introduce more defects. The association is heterogeneous, depends on the weighting and rests on a few repositories, and the data neither identify a mechanism nor support causal claims. The results are consistent with studies that find agent commits concentrated in maintenance work~\cite{khosravani2026,ferdous2026}, which would increase fix-like follow-ups without implying worse code. \textit{Construct validity.} $R_{14}$ measures repair activity, not defects; its 50\% base rate shows that it is broad, and inflected forms such as ``fixed'' are not matched. Sections~\ref{sec:bias}, \ref{sec:sim} and~\ref{sec:proxy} show that the conclusion depends on unmeasured, possibly differential precision, and quantify how much. Marker precision and recall in our 45 repositories are unknown; an external validation found message-signature precision of 75.0\% and 90.5\% in two snapshots~\cite{khosravani2026}, and our toolkit includes a marker audit. \textit{Internal validity.} Matching does not control for task type, whether the commit is itself a repair, author experience or maintenance load. AI use among unmarked commits is unknown and biases the comparison toward zero. DiD removes time-invariant differences only. \textit{Statistical validity.} Several analyses are post hoc and uncorrected for multiplicity, the plan was not externally registered, and the repository-level variances used for the random-effects analyses are approximations, although they reproduce the reported random-effects result (+2.43, $I^2 = 68\%$). \textit{External validity.} The repositories were selected because AI markers are common in them, which may favour projects whose developers use and disclose AI unusually often; many of them are AI tools, and the tools changed substantially during 2024--2026. \textit{Practical size.} At the observed base rate, +2.8 points corresponds to about 28 additional spreading-repair events per 1,000 AI-marked commits, or 19 by the DiD estimate, against roughly 480 that occur anyway. \textit{Implications for mining studies.} Table~\ref{tab:checks} lists the checks we recommend reporting alongside any pooled estimate from marker-labelled commits. Each check changed what this study can claim, and the simulation shows why each is needed.
+
+\begin{table}[!tb]
+\caption{Recommended checks for mining studies of AI-marked commits, and what each showed here.}\label{tab:checks}
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{0.29\textwidth}@{}}
+\toprule
+Check & Why it is needed & Result in this study \\
+\midrule
+Pre-period placebo & Detects gaps that predate the commit & $+1.0$ ($-0.6$, 2.6) \\
+Difference-in-differences & Removes time-invariant confounding (Sim2, Sim3) & $+1.9$ (0.3, 3.5) \\
+Within-author controls & Reduces between-person confounding & $+2.6$ ($-0.4$, 5.9) \\
+Wild cluster bootstrap & Calibrated with few clusters (Sim0) & $p = 0.020$ \\
+Prediction interval & Shows what a new repository can expect & $-10.4$ to $+15.2$ \\
+Cluster fragility index & Shows reliance on a few clusters & $\mathrm{FI}_{\mathrm{sig}} = 2$; $\mathrm{FI}_{\mathrm{dir}} = 8$ \\
+Labelling tipping point $\Delta q^{*}$ & States the artefact that would explain $\theta$, by~\eqref{eq:bias} & ${\le}\,5.4$ points (matched); ${\le}\,3.7$ (DiD) \\
+Label-precision audit by group & Differential noise can manufacture findings (Sim5, Fig.~\ref{fig:sim}) & Needs ${\approx}\,2{,}530$ events per group; toolkit provided \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Conclusion}
+
+Across 45 public repositories, 6,422 commits carrying an AI-assistance marker were followed by repair that reached beyond their own files 2.8 percentage points more often than 30,808 matched unmarked commits, or 1.9 points more often after removing a pre-existing gap. The difference is heterogeneous, sensitive to weighting and fragile: removing 2 of the 45 repositories removes its significance. A closed-form result, confirmed by a calibrated simulation, shows that a gap of at most 5.4 points in spurious-event rates (3.7 for the DiD estimate) would explain the finding, that DiD removes stable but not AI-induced labelling differences, and that percentile intervals are anti-conservative in this design. Ruling out such a gap by manual validation needs about 2,530 labelled events per group. The same checks apply to other mined comparisons of AI-assisted and human work.
+
+\runin{Data and Code Availability.} The repository-level data, analysis and simulation scripts with fixed seeds, marker rules, repository list, full sensitivity results, protocol and toolkit for validating the outcome proxy are available at the following anonymised repository: \url{https://anonymous.4open.science/r/cross-file-repair-artifact-241F/}. Commit messages and author identities are not redistributed because they are personal data of third parties.
+
+\runin{Generative AI Use Disclosure.} Claude (Anthropic) was used solely for language-level corrections, including correcting spelling mistakes, correcting grammar and punctuation, and fixing grammatical sentence errors without changing the original meaning. Generative AI was not used to generate research data, figures, or calculations. The author reviewed the manuscript and takes full responsibility for its accuracy, originality, and final content.
+
+%
+% ---- Bibliography ----
+% thebibliography prints its own "References" heading.
+% Do NOT add \section*{References} before it (that caused the duplicate heading).
+%
+\begin{thebibliography}{10}
+
+\bibitem{arnold1996}
+Arnold, R.S., Bohner, S.A.: Software Change Impact Analysis. IEEE Computer Society Press, Los Alamitos (1996)
+
+\bibitem{zimmermann2004}
+Zimmermann, T., Wei{\ss}gerber, P., Diehl, S., Zeller, A.: Mining version histories to guide software changes. In: Proc. 26th International Conference on Software Engineering (ICSE), pp. 563--572 (2004)
+
+\bibitem{li2025}
+Li, H., Zhang, H., Hassan, A.E.: The rise of AI teammates in software engineering (SE) 3.0: How autonomous coding agents are reshaping software engineering. arXiv:2507.15003 (2025)
+
+\bibitem{jimenez2024}
+Jimenez, C.E., et al.: SWE-bench: Can language models resolve real-world GitHub issues? In: Proc. International Conference on Learning Representations (ICLR) (2024)
+
+\bibitem{watanabe2026}
+Watanabe, M., Li, H., Kashiwa, Y., Reid, B., Iida, H., Hassan, A.E.: On the use of agentic coding: An empirical study of pull requests on GitHub. ACM Transactions on Software Engineering and Methodology (2026), accepted; arXiv:2509.14745
+
+\bibitem{wang2026}
+Wang, Y., Pradel, M., Liu, Z.: Are ``solved issues'' in SWE-bench really solved correctly? An empirical study. In: Proc. 48th IEEE/ACM International Conference on Software Engineering (ICSE) (2026). \url{https://doi.org/10.1145/3744916.3764576}
+
+\bibitem{khosravani2026}
+Khosravani, A., Mockus, A.: Detecting AI coding agents in open source: A validated multi-method census of 180 million repositories. arXiv:2606.24429 (2026)
+
+\bibitem{kraishan2026}
+Kraishan, O.: Not all agents are equal: Code quality and post-merge maintenance across five autonomous coding agents in the wild. arXiv:2609.17598 (2026)
+
+\bibitem{xia2026}
+Xia, C.S., Miller, C.: Do these violent delights have violent ends? Measuring the postmerge fate of agentic code. arXiv:2607.09902 (2026)
+
+\bibitem{sculley2015}
+Sculley, D., et al.: Hidden technical debt in machine learning systems. In: Advances in Neural Information Processing Systems, vol.~28 (2015)
+
+\bibitem{misra2026}
+Misra, D., et al.: GitChameleon 2.0: Evaluating AI code generation against Python library version incompatibilities. In: Proc. 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) (2026)
+
+\bibitem{spracklen2025}
+Spracklen, J., Wijewickrama, R., Sakib, A.H.M.N., Maiti, A., Viswanath, B., Jadliwala, M.: We have a package for you! A comprehensive analysis of package hallucinations by code generating LLMs. In: Proc. 34th USENIX Security Symposium (2025)
+
+\bibitem{liu2023}
+Liu, J., Xia, C.S., Wang, Y., Zhang, L.: Is your code generated by ChatGPT really correct? Rigorous evaluation of large language models for code generation. In: Advances in Neural Information Processing Systems, vol.~36 (2023)
+
+\bibitem{pearce2022}
+Pearce, H., Ahmad, B., Tan, B., Dolan-Gavitt, B., Karri, R.: Asleep at the keyboard? Assessing the security of GitHub Copilot's code contributions. In: Proc. IEEE Symposium on Security and Privacy, pp. 754--768 (2022)
+
+\bibitem{fu2025}
+Fu, Y., et al.: Security weaknesses of Copilot-generated code in GitHub projects: An empirical study. ACM Transactions on Software Engineering and Methodology (2025)
+
+\bibitem{chen2024}
+Chen, L., Zaharia, M., Zou, J.: How is ChatGPT's behavior changing over time? Harvard Data Science Review (2024). \url{https://doi.org/10.1162/99608f92.5317da47}
+
+\bibitem{sliwerski2005}
+\'Sliwerski, J., Zimmermann, T., Zeller, A.: When do changes induce fixes? ACM SIGSOFT Software Engineering Notes \textbf{30}(4), 1--5 (2005)
+
+\bibitem{herzig2013}
+Herzig, K., Just, S., Zeller, A.: It's not a bug, it's a feature: How misclassification impacts bug prediction. In: Proc. 35th International Conference on Software Engineering (ICSE), pp. 392--401 (2013)
+
+\bibitem{liu2026}
+Liu, Y., Widyasari, R., Zhao, Y., Irsan, I.C., Chen, J., Lo, D.: Debt behind the AI boom: A large-scale empirical study of AI-generated code in the wild. arXiv:2603.28592 (2026)
+
+\bibitem{he2026}
+He, H., Miller, C., Agarwal, S., K\"astner, C., Vasilescu, B.: Speed at the cost of quality: How Cursor AI increases short-term velocity and long-term complexity in open-source projects. In: Proc. 23rd International Conference on Mining Software Repositories (MSR) (2026)
+
+\bibitem{ferdous2026}
+Ferdous, K.M., Banik, D., Chowdhury, K., Shamim, S.I.: Safer builders, risky maintainers: A comparative study of breaking changes in human vs agentic PRs. In: Proc. 23rd International Conference on Mining Software Repositories (MSR) (2026). \url{https://doi.org/10.1145/3793302.3793610}
+
+\bibitem{oukay2026}
+Oukay, I., Begoug, M., Chouchen, M., Ouni, A.: When AI code doesn't stick: An empirical study on reverted changes introduced by AI coding agents. In: Proc. 23rd International Conference on Mining Software Repositories (MSR) (2026). \url{https://doi.org/10.1145/3793302.3793587}
+
+\bibitem{cameron2008}
+Cameron, A.C., Gelbach, J.B., Miller, D.L.: Bootstrap-based improvements for inference with clustered errors. The Review of Economics and Statistics \textbf{90}(3), 414--427 (2008)
+
+\bibitem{inthout2014}
+IntHout, J., Ioannidis, J.P.A., Borm, G.F.: The Hartung--Knapp--Sidik--Jonkman method for random effects meta-analysis is straightforward and considerably outperforms the standard DerSimonian--Laird method. BMC Medical Research Methodology \textbf{14}, 25 (2014)
+
+\bibitem{higgins2009}
+Higgins, J.P.T., Thompson, S.G., Spiegelhalter, D.J.: A re-evaluation of random-effects meta-analysis. Journal of the Royal Statistical Society: Series A \textbf{172}(1), 137--159 (2009)
+
+\bibitem{walsh2014}
+Walsh, M., et al.: The statistical significance of randomized controlled trial results is frequently fragile: A case for a Fragility Index. Journal of Clinical Epidemiology \textbf{67}(6), 622--628 (2014)
+
+\bibitem{broderick2020}
+Broderick, T., Giordano, R., Meager, R.: An automatic finite-sample robustness metric: When can dropping a little data make a big difference? arXiv:2011.14999 (2020)
+
+\bibitem{morris2019}
+Morris, T.P., White, I.R., Crowther, M.J.: Using simulation studies to evaluate statistical methods. Statistics in Medicine \textbf{38}(11), 2074--2102 (2019)
+
+\bibitem{efron1987}
+Efron, B.: Better bootstrap confidence intervals. Journal of the American Statistical Association \textbf{82}(397), 171--185 (1987)
+
+\bibitem{dersimonian1986}
+DerSimonian, R., Laird, N.: Meta-analysis in clinical trials. Controlled Clinical Trials \textbf{7}(3), 177--188 (1986)
+
+\bibitem{higgins2002}
+Higgins, J.P.T., Thompson, S.G.: Quantifying heterogeneity in a meta-analysis. Statistics in Medicine \textbf{21}(11), 1539--1558 (2002)
+
+\bibitem{lash2009}
+Lash, T.L., Fox, M.P., Fink, A.K.: Applying Quantitative Bias Analysis to Epidemiologic Data. Springer, New York (2009)
+
+\bibitem{vanderweele2017}
+VanderWeele, T.J., Ding, P.: Sensitivity analysis in observational research: Introducing the E-value. Annals of Internal Medicine \textbf{167}(4), 268--274 (2017)
+
+\end{thebibliography}
+\end{document}
